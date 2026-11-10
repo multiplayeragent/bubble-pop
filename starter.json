@@ -1,0 +1,21 @@
+{
+  "name": "Bubble Pop",
+  "genre": "puzzle",
+  "dim": "2D",
+  "mode": "Versus",
+  "players": "2–4",
+  "hook": "Pop bubbles, drop clusters, flood your rivals.",
+  "how": "Aim the launcher and shoot: 3 of a color pop, and anything left hanging falls. Drop 3 or more and a rival gets an extra row pushed in from the top. A bubble past the line is out; last board standing wins.",
+  "controls": "Mouse to aim, click to shoot, right-click or Shift to swap; on touch, drag to aim and let go",
+  "uses": [
+    ["Live sync", "Every rival's board, aim and shots play out next to yours."],
+    ["Host-run rounds", "The host's browser runs the match: who is out, the winner and the restart. If it leaves, the next player takes over."],
+    ["Bots", "Bots fill empty seats: they line up shots and go for big drops."],
+    ["Leaderboard", "Each player's best score in one match."]
+  ],
+  "ideas": [
+    "Add a bomb bubble that pops everything around it",
+    "Make it underwater with fish instead of bubbles",
+    "Add a co-op mode where we share one big board"
+  ]
+}
