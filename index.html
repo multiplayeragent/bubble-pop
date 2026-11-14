@@ -18,6 +18,7 @@
   .card h2 { margin: 0 0 6px; font-size: 26px; }
   .card h3 { margin: 12px 0 0; font-size: 12px; letter-spacing: .1em; color: #8fc3e8; }
   .card ol { text-align: left; margin: 8px 0; padding-left: 26px; font-size: 14px; } .card li span { float: right; } .card li.me { color: #ffd23f; font-weight: 700; }
+  .card li.msg { list-style: none; margin-left: -26px; text-align: center; color: #8fc3e8; }
   button.go { width: 100%; min-height: 48px; border: 0; border-radius: 12px; background: #ffd23f; color: #0f2c47; font: 800 17px system-ui, sans-serif; cursor: pointer; margin-top: 8px; }
   #oNext { color: #8fc3e8; font-size: 13px; margin-top: 8px; }
 </style>
@@ -30,7 +31,7 @@
 <div class="hud" id="net">Connecting…</div>
 <div id="over" hidden><div class="card">
   <h2 id="oTitle"></h2><ol id="places"></ol>
-  <h3>BEST SCORE IN ONE MATCH</h3><ol id="board"><li>Loading the leaderboard…</li></ol>
+  <h3>BEST SCORE IN ONE MATCH</h3><ol id="board"><li class="msg">Loading the leaderboard…</li></ol>
   <button class="go" id="again">Play again</button><div id="oNext"></div>
 </div></div>
 <script>
@@ -334,13 +335,13 @@ function writeMatch(m) { m = { ...m, v: (match()?.v ?? 0) + 1 }; host.last = m; 
 const nameOf = (m, id) => (id === net.sessionId ? myName : m?.bots.find((b) => b.i === id)?.n) || String(S.entities.players?.[id]?.n ?? "Player").slice(0, 12);
 const colorOf = (m, id) => (id === net.sessionId ? myColor : m?.bots.find((b) => b.i === id)?.c) || S.entities.players?.[id]?.c || "#aaa";
 const isBot = (m, id) => !!m && m.bots.some((b) => b.i === id);
-const newBot = (B) => ({ B, plan: null, nextAt: 0, mistake: CONFIG.botMistake });
+const newBot = (B, wait = 0) => ({ B, plan: null, nextAt: performance.now() + wait + Math.random() * CONFIG.botThinkMs, mistake: CONFIG.botMistake }); // a random first think, so bots don't all shoot at once
 
 function newMatch(id) {
   const hs = humans().slice(0, CONFIG.seats), used = new Set(hs.map((h) => colorOf(null, h))), free = COLORS.filter((c) => !used.has(c)), names = [...BOT_NAMES].sort(() => Math.random() - 0.5);
   const bots = Array.from({ length: Math.max(hs.length ? 0 : 1, CONFIG.seats - hs.length) }, (_, k) => ({ i: "bot" + (k + 1), n: names[k], c: free[k % free.length] }));
   const seed = (Math.random() * 1e9) | 0;
-  host.bots = new Map(bots.map((b) => [b.i, newBot(newBoard(seed))]));
+  host.bots = new Map(bots.map((b) => [b.i, newBot(newBoard(seed), CONFIG.countdownMs)]));
   return { id, ph: "count", seed, startAt: Date.now() + CONFIG.countdownMs, players: [...hs, ...bots.map((b) => b.i)], bots, out: [], winner: "", endsAt: 0, ready: [] };
 }
 /** Become host: take the bots' boards over exactly as state has them. */
@@ -454,8 +455,9 @@ function steerBot(bot, now, dt) {
     const p = planBot(B, bot.mistake);
     if (!p) { bot.nextAt = now + 500; return; }
     if (p.swap) swapBubbles(B);
-    bot.plan = { ang: Math.max(MIN_AIM, Math.min(MAX_AIM, p.ang + (Math.random() - 0.5) * 2 * CONFIG.botAimNoise)) };
+    bot.plan = { k: B.k, ang: Math.max(MIN_AIM, Math.min(MAX_AIM, p.ang + (Math.random() - 0.5) * 2 * CONFIG.botAimNoise)) };
   }
+  if (bot.plan.k !== B.k) { bot.plan = null; return; } // a row pushed in while it aimed: look again
   const d = bot.plan.ang - B.aim, step = CONFIG.botTurn * dt;
   if (Math.abs(d) > step) { B.aim += Math.sign(d) * step; return; }
   B.aim = bot.plan.ang; bot.plan = null;
@@ -511,7 +513,7 @@ function afterStep(m, id, B, res) {
     }
   }
   if ((res.rows || res.timed) && mine) { fx.shake = res.rows ? 9 : 4; tone(res.rows ? 90 : 140, 200, "square", 0.04); }
-  if (res.ko) { fx.texts.push({ id, text: "KO", color: "#ff5a6e", at: now }); if (mine) tone(110, 700, "sawtooth", 0.07); }
+  if (res.ko && mine) tone(110, 700, "sawtooth", 0.07); // the board itself shows "KO"
   if (mine) publish(true);
 }
 function publish(force) {
@@ -547,6 +549,7 @@ function applySnapshot(id, R, v, now) {
     else fx.drops.push({ id, x, y, ch, vx: (Math.random() - 0.5) * 3, vy: -2 - Math.random() * 2, at: now });
   }
   if (d > 0) R.slide += d;
+  if (R.shot && !(v.sh && v.sh[0] === R.shotN)) R.shot = null; // the owner's shot already landed and this snapshot has the result: don't also stick our copy (a ghost bubble)
   if (v.sh && v.sh[0] !== R.shotN) { R.shotN = v.sh[0]; R.shot = newShot(+v.sh[1] || Math.PI / 2, v.sh[2]); R.lastColor = v.sh[2]; }
   Object.assign(R, { grid: g, k: v.k || 0, aimTo: ((+v.aim || 90) * Math.PI) / 180, alive: !!v.a, score: v.s || 0, sent: v.j || 0, q: v.q || 0, cur: v.c || "", next: v.x || "" });
 }
@@ -791,11 +794,11 @@ function hud(m) {
   overFor = m.id;
   const list = $("board"), score = me.B && me.m === m.id ? me.B.score : 0;
   if (m.winner === net.sessionId) tone(660, 400, "triangle", 0.07);
-  if (!board) { list.innerHTML = "<li>Leaderboards need a connection.</li>"; return; }
-  list.innerHTML = "<li>Loading…</li>";
+  if (!board) { list.innerHTML = '<li class="msg">Leaderboards need a connection.</li>'; return; }
+  list.innerHTML = '<li class="msg">Loading…</li>';
   (score > 0 ? board.submit(score).catch(() => null) : Promise.resolve()).then(() => board.top(10)).then(({ entries }) => {
-    list.innerHTML = entries.length ? entries.map((e) => `<li>${esc(e.username || "Player")}<span>${e.score}</span></li>`).join("") : "<li>No scores yet. Pop some bubbles!</li>";
-  }).catch(() => { list.innerHTML = "<li>Couldn't load the leaderboard.</li>"; });
+    list.innerHTML = entries.length ? entries.map((e) => `<li>${esc(e.username || "Player")}<span>${e.score}</span></li>`).join("") : '<li class="msg">No scores yet. Pop some bubbles!</li>';
+  }).catch(() => { list.innerHTML = '<li class="msg">Couldn\'t load the leaderboard.</li>'; });
 }
 $("again").addEventListener("click", () => { if (isHost()) onReady(net.sessionId); else net.send("ready", { r: 1 }); });
 
@@ -840,6 +843,7 @@ cv.addEventListener("contextmenu", (e) => e.preventDefault());
 document.addEventListener("touchmove", (e) => { if (!e.target.closest(".card")) e.preventDefault(); }, { passive: false });
 const KEYMAP = { ArrowLeft: "left", a: "left", ArrowRight: "right", d: "right", ArrowUp: "shoot", w: "shoot", " ": "shoot", Enter: "shoot", ArrowDown: "swap", s: "swap", Shift: "swap", x: "swap" };
 addEventListener("keydown", (e) => {
+  if (e.target.closest?.("button")) return; // Enter / Space on "Play again" press the button
   const k = KEYMAP[e.key.length === 1 ? e.key.toLowerCase() : e.key];
   if (!k) return;
   e.preventDefault(); unlockAudio();
